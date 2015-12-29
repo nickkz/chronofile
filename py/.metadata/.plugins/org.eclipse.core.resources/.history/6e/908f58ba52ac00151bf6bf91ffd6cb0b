@@ -1,0 +1,130 @@
+'''
+Created on Dec 23, 2015
+
+@author: nick
+'''
+#import numpy
+#import pandas
+#import sys
+#import datetime
+import pymysql.cursors
+import yql
+
+from numpy import *
+from numpy.random import permutation
+from pandas import DataFrame, Series
+from pandas.io.data import DataReader
+#from pandas_datareader import data, wb
+from datetime import datetime
+from yahoo_finance import Share
+from urllib import *
+try: import simplejson as json
+except ImportError: import json
+
+class Quote(object):
+   
+    DATE_FMT = '%Y-%m-%d'
+    TIME_FMT = '%H:%M:%S'
+    DEBUG = False
+    INFO = True
+       
+    def __init__(self):
+        self.symbol = ''
+        self.date,self.open_,self.high,self.low,self.close,self.volume,self.adj_close = ([] for _ in range(7))
+        Quote.print_debug (self, 'Init Base Quote')
+
+    def print_debug(self, txt):
+        if Quote.DEBUG == True:
+            print (txt)
+            
+    def print_info(self, txt):
+        if Quote.INFO == True:
+            print (txt)            
+         
+    def query(self):
+        Quote.print_info (self, '\nProcessing ' + self.symbol + ":")
+        tickerDR = DataReader(self.symbol,  'yahoo', datetime(2015,12,1), datetime(2015,12,23))
+        Quote.print_debug(self, tickerDR)
+
+        try:
+            Quote.print_debug (self, '\nOpen Connection to MySQL')
+            connection = pymysql.connect(host='localhost', user='root', password='link', db='volarb', charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor)
+            Quote.print_debug(self, connection)
+        
+            for i in range(len(tickerDR)):
+                Quote.print_debug(self, "\nProcessing Data")
+                self.date.append(str(tickerDR.index[i]))
+                self.open_.append(float(tickerDR['Open'][i]))
+                self.high.append(float(tickerDR['High'][i]))
+                self.low.append(float(tickerDR['Low'][i]))
+                self.close.append(float(tickerDR['Close'][i]))
+                self.volume.append(int(tickerDR['Volume'][i]))            
+                self.adj_close.append(float(tickerDR['Adj Close'][i]))
+                with connection.cursor() as cursor:
+                    sql = "select fnInsertSecDaily('NASDAQ', 'SMART', %s, %s, %r, %r, %r, %r, %r, %r);"
+                    retVal = cursor.execute(sql, (self.symbol, str(tickerDR.index[i]), float(tickerDR['Open'][i]), float(tickerDR['High'][i]), float(tickerDR['Low'][i]), float(tickerDR['Close'][i]), float(tickerDR['Adj Close'][i]), int(tickerDR['Volume'][i])))
+                    Quote.print_debug (self, "Returned " + str(retVal))
+            
+                connection.commit()
+        finally:
+            Quote.print_debug (self, 'Close Connection to MySQL')
+            connection.close()
+                
+            
+    def __repr__(self):
+        return self.symbol
+
+class YahooQuote(Quote):
+    ''' Daily quotes from Yahoo. Date format='yyyy-mm-dd' '''
+    def __init__(self,symbol,start_date,end_date=datetime.today().isoformat()):
+        super(YahooQuote, self).__init__()
+        self.symbol = symbol.upper()
+        Quote.print_debug (self, 'Init ' + self.symbol)
+
+class YahooStockInfo(object):
+    
+    PUBLIC_API_URL = 'http://query.yahooapis.com/v1/public/yql'
+    DATATABLES_URL = 'store://datatables.org/alltableswithkeys'
+    HISTORICAL_URL = 'http://ichart.finance.yahoo.com/table.csv?s='
+    RSS_URL = 'http://finance.yahoo.com/rss/headline?s='
+    FINANCE_TABLES = {'quotes': 'yahoo.finance.quotes',
+                     'options': 'yahoo.finance.options',
+                     'quoteslist': 'yahoo.finance.quoteslist',
+                     'sectors': 'yahoo.finance.sectors',
+                     'industry': 'yahoo.finance.industry'}    
+    
+    def __init__(self,symbol,start_date,end_date=datetime.today().isoformat()):
+        self.symbol = symbol
+        Quote.print_info (self, 'Init Base Info for' + symbol)
+
+    def __format_symbol_list(self, symbolList):
+        return ",".join(["\""+stock+"\"" for stock in symbolList])
+
+    def get_current_info(self, symbolList, columnsToRetrieve='*'):
+        """Retrieves the latest data (15 minute delay) for the
+        provided symbols."""
+    
+        columns = ','.join(columnsToRetrieve)
+        symbols = __format_symbol_list(self, symbolList)
+    
+        yql = 'select %s from %s where symbol in (%s)' \
+              %(columns, FINANCE_TABLES['quotes'], symbols)
+        response = executeYQLQuery(yql)
+        return __validate_response(response, 'quote')
+
+    def executeYQLQuery(sqlf, yql):
+        conn = httplib.HTTPConnection('query.yahooapis.com')
+        queryString = urllib.urlencode({'q': yql, 'format': 'json', 'env': DATATABLES_URL})
+        conn.request('GET', PUBLIC_API_URL + '?' + queryString)
+        return json.loads(conn.getresponse().read())
+
+      
+if __name__ == '__main__':
+    pass
+
+print ('Init Main')
+tickers = ['NFLX', 'GOOG', 'TSLA', 'AAPL', 'MSFT', 'NVDA']
+for ticker in tickers:
+    yq = YahooQuote(ticker, datetime(2015,12,1))
+    yq.query()
+    ysi = YahooStockInfo(ticker, datetime(2015,12,1))

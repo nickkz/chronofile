@@ -1,0 +1,92 @@
+'''
+Created on Dec 23, 2015
+
+@author: nick
+'''
+#import numpy
+#import pandas
+#import sys
+#import datetime
+import pymysql.cursors
+
+from numpy import *
+from numpy.random import permutation
+from pandas import DataFrame, Series
+from pandas.io.data import DataReader
+#from pandas_datareader import data, wb
+from datetime import datetime
+from yahoo_finance import Share
+from urllib import *
+
+class Quote(object):
+   
+    DATE_FMT = '%Y-%m-%d'
+    TIME_FMT = '%H:%M:%S'
+    DEBUG = False
+    INFO = True
+       
+    def __init__(self):
+        self.symbol = ''
+        self.date,self.open_,self.high,self.low,self.close,self.volume,self.adj_close = ([] for _ in range(7))
+        Quote.print_debug (self, 'Init Base Quote')
+
+    def print_debug(self, txt):
+        if Quote.DEBUG == True:
+            print (txt)
+            
+    def print_info(self, txt):
+        if Quote.INFO == True:
+            print (txt)            
+         
+    def query(self):
+        Quote.print_info (self, '\nProcessing ' + self.symbol + ":")
+        tickerDR = DataReader(self.symbol,  'yahoo', datetime(2015,12,1), datetime(2015,12,23))
+        Quote.print_debug(self, tickerDR)
+
+        try:
+            Quote.print_debug (self, '\nOpen Connection to MySQL')
+            connection = pymysql.connect(host='localhost', user='root', password='link', db='volarb', charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor)
+            Quote.print_debug(self, connection)
+        
+            for i in range(len(tickerDR)):
+                Quote.print_debug(self, "\nProcessing Data")
+                self.date.append(str(tickerDR.index[i]))
+                self.open_.append(float(tickerDR['Open'][i]))
+                self.high.append(float(tickerDR['High'][i]))
+                self.low.append(float(tickerDR['Low'][i]))
+                self.close.append(float(tickerDR['Close'][i]))
+                self.volume.append(int(tickerDR['Volume'][i]))            
+                self.adj_close.append(float(tickerDR['Adj Close'][i]))
+                with connection.cursor() as cursor:
+                    sql = "select fnInsertSecDaily('NASDAQ', 'SMART', %s, %s, %r, %r, %r, %r, %r, %r);"
+                    retVal = cursor.execute(sql, (self.symbol, str(tickerDR.index[i]), float(tickerDR['Open'][i]), float(tickerDR['High'][i]), float(tickerDR['Low'][i]), float(tickerDR['Close'][i]), float(tickerDR['Adj Close'][i]), int(tickerDR['Volume'][i])))
+                    Quote.print_debug (self, "Returned " + str(retVal))
+            
+                connection.commit()
+        finally:
+            Quote.print_debug (self, 'Close Connection to MySQL')
+            connection.close()
+                
+            
+    def __repr__(self):
+        return self.symbol
+
+class YahooQuote(Quote):
+    ''' Daily quotes from Yahoo. Date format='yyyy-mm-dd' '''
+    def __init__(self,symbol,start_date,end_date=datetime.today().isoformat()):
+        super(YahooQuote, self).__init__()
+        self.symbol = symbol.upper()
+        Quote.print_debug (self, 'Init ' + self.symbol)
+        #start_year,start_month,start_day = start_date.split('-')
+        #start_month = str(int(start_month)-1)
+        #end_year,end_month,end_day = end_date.split('-')
+        #end_month = str(int(end_month)-1)
+      
+if __name__ == '__main__':
+    pass
+
+print ('Init Main')
+tickers = ['NFLX', 'GOOG', 'TSLA', 'AAPL', 'MSFT']
+for ticker in tickers:
+    yq = YahooQuote(ticker, datetime(2015,12,1))
+    yq.query()
