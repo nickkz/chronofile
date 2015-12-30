@@ -3,10 +3,18 @@ Created on Dec 23, 2015
 
 @author: nick
 '''
-#import numpy
-#import pandas
-#import sys
-#import datetime
+
+#Constants
+DATE_FMT = '%Y-%m-%d'
+TIME_FMT = '%H:%M:%S'
+DEBUG = False
+INFO = True
+DB_HOST = ''
+DB_USER = ''
+DB_PASSWORD = ''
+DB_DATABASE = ''
+
+#Imports
 import pymysql.cursors
 import yql
 import urllib
@@ -20,39 +28,38 @@ from datetime import datetime
 from yahoo_finance import Share
 try: import simplejson as json
 except ImportError: import json
+try: from cf_config_dev import *
+except ImportError: pass
+
+def print_debug(self, txt):
+    if DEBUG == True:
+        print (txt)
+        
+def print_info(self, txt):
+    if INFO == True:
+        print (txt)    
 
 class Quote(object):
    
-    DATE_FMT = '%Y-%m-%d'
-    TIME_FMT = '%H:%M:%S'
-    DEBUG = False
-    INFO = True
-       
     def __init__(self):
         self.symbol = ''
         self.date,self.open_,self.high,self.low,self.close,self.volume,self.adj_close = ([] for _ in range(7))
-        Quote.print_debug (self, 'Init Base Quote')
+        print_debug (self, 'Init Base Quote')
 
-    def print_debug(self, txt):
-        if Quote.DEBUG == True:
-            print (txt)
-            
-    def print_info(self, txt):
-        if Quote.INFO == True:
-            print (txt)            
-         
     def query(self):
-        Quote.print_info (self, '\nProcessing ' + self.symbol + ":")
-        tickerDR = DataReader(self.symbol,  'yahoo', datetime(2015,12,1), datetime(2015,12,23))
-        Quote.print_debug(self, tickerDR)
+        print_info (self, 'Processing ' + self.symbol + " Historical Quotes")
+        today = datetime.now()
+        firstOfMonth = datetime(today.year, today.month, 1)
+        tickerDR = DataReader(self.symbol,  'yahoo', firstOfMonth, today)
+        print_debug(self, tickerDR)
 
         try:
-            Quote.print_debug (self, '\nOpen Connection to MySQL')
-            connection = pymysql.connect(host='localhost', user='root', password='link', db='volarb', charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor)
-            Quote.print_debug(self, connection)
+            print_debug (self, '\nOpening Connection to MySQL')
+            connection = pymysql.connect(host=DB_HOST, user=DB_USER, password=DB_PASSWORD, db=DB_DATABASE, charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor)
+            print_debug(self, connection)
         
             for i in range(len(tickerDR)):
-                Quote.print_debug(self, "\nProcessing Data")
+                print_debug(self, "\nProcessing Data")
                 self.date.append(str(tickerDR.index[i]))
                 self.open_.append(float(tickerDR['Open'][i]))
                 self.high.append(float(tickerDR['High'][i]))
@@ -63,11 +70,11 @@ class Quote(object):
                 with connection.cursor() as cursor:
                     sql = "select fnInsertSecDaily('NASDAQ', 'SMART', %s, %s, %r, %r, %r, %r, %r, %r);"
                     retVal = cursor.execute(sql, (self.symbol, str(tickerDR.index[i]), float(tickerDR['Open'][i]), float(tickerDR['High'][i]), float(tickerDR['Low'][i]), float(tickerDR['Close'][i]), float(tickerDR['Adj Close'][i]), int(tickerDR['Volume'][i])))
-                    Quote.print_debug (self, "Returned " + str(retVal))
+                    print_debug (self, "Returned " + str(retVal))
             
                 connection.commit()
         finally:
-            Quote.print_debug (self, 'Close Connection to MySQL')
+            print_debug (self, 'Closing Connection to MySQL')
             connection.close()
                 
             
@@ -79,7 +86,7 @@ class YahooQuote(Quote):
     def __init__(self,symbol,start_date,end_date=datetime.today().isoformat()):
         super(YahooQuote, self).__init__()
         self.symbol = symbol.upper()
-        Quote.print_debug (self, 'Init ' + self.symbol)
+        print_debug (self, 'Init ' + self.symbol)
 
 class QueryError(Exception):
 
@@ -109,19 +116,19 @@ class YahooStockInfo(object):
 
     def __init__(self,symbol,start_date,end_date=datetime.today().isoformat()):
         self.symbol = symbol
-        Quote.print_info (self, '\nInit Base Info for ' + symbol)
+        print_debug (self, 'Init Base Info for ' + symbol)
         #stuff = self.get_current_info(symbol.split(), ['PERatio', 'DividendYield', 'EarningsShare', 'EPSEstimateNextQuarter', 'FiftydayMovingAverage', 'OneyrTargetPrice', 'PercentChange'])
         stockInfo = self.get_current_info(symbol.split())
-        print (stockInfo)
-        print (stockInfo['EPSEstimateNextQuarter'])
-        Quote.print_debug (self, '\nOpen Connection to MySQL')
-        connection = pymysql.connect(host='localhost', user='root', password='link', db='volarb', charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor)
-        Quote.print_debug(self, connection)
+        print_debug (self, stockInfo)
+        print_debug (self, stockInfo['EPSEstimateNextQuarter'])
+        print_debug (self, 'Open Connection to MySQL ' + DB_HOST + ' User ' + DB_USER + ' DB ' + DB_DATABASE)
+        connection = pymysql.connect(host=DB_HOST, user=DB_USER, password=DB_PASSWORD, db=DB_DATABASE, charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor)
+        print_debug(self, connection)
         
         try:
             with connection.cursor() as cursor:
                 sql = "select fnInsertSecFundamental('NASDAQ', 'SMART', %s, '2015-12-27', %r, %s, %r, %r, %r, %r, %r, %r, %r, %r, %r, %r, %r, %r, %r, %s, %r, %s, %r, %r, %r, %r, %r, %r);"
-                print(sql)
+                print_debug(self, sql)
                 retVal = cursor.execute(sql, (self.symbol, \
                                               self.__convert_float(stockInfo['OneyrTargetPrice']), str(stockInfo['MarketCapitalization']), self.__convert_float(stockInfo['AverageDailyVolume']), \
                                               self.__convert_float(stockInfo['FiftydayMovingAverage']), self.__convert_float(stockInfo['ChangeFromFiftydayMovingAverage']), self.__convert_float(stockInfo['PercentChangeFromFiftydayMovingAverage'].replace("%", "")), \
@@ -131,11 +138,11 @@ class YahooStockInfo(object):
                                               str(stockInfo['DividendPayDate']), self.__convert_float(stockInfo['DividendYield']), str(stockInfo['ExDividendDate']), \
                                               self.__convert_float(stockInfo['DividendShare']), self.__convert_float(stockInfo['BookValue']), self.__convert_float(stockInfo['PriceSales']), \
                                               self.__convert_float(stockInfo['PERatio']), self.__convert_float(stockInfo['PEGRatio']), self.__convert_float(stockInfo['ShortRatio'])))
-                Quote.print_debug (self, "Returned " + str(retVal))
+                print_debug (self, "Returned " + str(retVal))
                 connection.commit()
 
         finally:
-            Quote.print_debug (self, 'Close Connection to MySQL')
+            print_debug (self, 'Close Connection to MySQL')
             connection.close()                    
 
     def __format_symbol_list(self, symbolList):
@@ -160,7 +167,7 @@ class YahooStockInfo(object):
         #conn = httplib.HTTPConnection('query.yahooapis.com')
         queryString = urllib.parse.urlencode({'q': yql, 'format': 'json', 'env': YahooStockInfo.DATATABLES_URL})
         #conn.request('GET', YahooStockInfo.PUBLIC_API_URL + '?' + queryString)
-        print ("Loading " + YahooStockInfo.PUBLIC_API_URL + '?' + queryString)
+        print_debug (self, "Loading " + YahooStockInfo.PUBLIC_API_URL + '?' + queryString)
         return json.loads(urllib.request.urlopen(YahooStockInfo.PUBLIC_API_URL + '?' + queryString).read())
 
     def get_current_info(self, symbolList, columnsToRetrieve='*'):
@@ -182,6 +189,9 @@ if __name__ == '__main__':
 print ('Init Main')
 tickers = ['NFLX', 'GOOG', 'TSLA', 'AAPL', 'MSFT', 'NVDA']
 for ticker in tickers:
-    ysi = YahooStockInfo(ticker, datetime(2015,12,1))
-    yq = YahooQuote(ticker, datetime(2015,12,1))
+    today = datetime.now()
+    firstOfMonth = datetime(today.year, today.month, 1)
+    print ('\nProcessing ' + ticker + ' Fundamental Data from ' + firstOfMonth.strftime(DATE_FMT))
+    ysi = YahooStockInfo(ticker, firstOfMonth)
+    yq = YahooQuote(ticker, firstOfMonth)
     yq.query()
